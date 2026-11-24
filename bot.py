@@ -5,7 +5,7 @@ from google.genai import types
 from openai import AsyncOpenAI
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.constants import ChatAction
-from telegram.error import TimedOut, NetworkError
+from telegram.error import TimedOut, NetworkError, RetryAfter, Conflict
 from telegram.ext import (Application, CommandHandler, MessageHandler, CallbackQueryHandler,
                           ContextTypes, filters)
 import media
@@ -496,14 +496,22 @@ def build_app():
 
 
 def main():
-    # при сетевых сбоях (TimedOut и т.п.) не падаем, а пробуем снова
+    # при сбоях сети и лимитах Telegram не падаем, а ждём и пробуем снова
     while True:
         try:
             build_app().run_polling(bootstrap_retries=-1, close_loop=False)
             break
+        except RetryAfter as e:
+            ra = e.retry_after
+            wait = int(ra.total_seconds() if hasattr(ra, "total_seconds") else ra) + 3
+            log.warning("Telegram просит подождать %s сек, жду", wait)
+            time.sleep(wait)
         except (TimedOut, NetworkError) as e:
             log.warning("Сеть до Telegram недоступна (%s), повтор через 15 сек", e)
             time.sleep(15)
+        except Conflict:
+            log.warning("Запущен ещё один экземпляр бота, повтор через 30 сек")
+            time.sleep(30)
 
 
 if __name__ == "__main__":
