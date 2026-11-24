@@ -1,0 +1,32 @@
+name: run-bot
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 */5 * * *"      # перезапуск каждые 5 часов
+concurrency:
+  group: bot
+  cancel-in-progress: true      # новый запуск гасит старый, чтобы не было двух ботов
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 345        # лимит GitHub на задачу — 6 часов
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - uses: denoland/setup-deno@v2     # JS-движок, который yt-dlp нужен для YouTube
+        with: { deno-version: v2.x }
+      - run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      - run: pip install -r requirements.txt
+      - name: cookies (необязательно)
+        env:
+          YT_COOKIES: ${{ secrets.YT_COOKIES }}
+        run: |
+          if [ -n "$YT_COOKIES" ]; then printf '%s' "$YT_COOKIES" > cookies.txt; echo "YT_COOKIES_FILE=$PWD/cookies.txt" >> $GITHUB_ENV; fi
+      - run: python bot.py
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          OWNER_ID: ${{ secrets.OWNER_ID }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
+          ALLOWED_CHATS: ${{ secrets.ALLOWED_CHATS }}
