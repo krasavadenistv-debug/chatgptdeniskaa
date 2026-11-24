@@ -1,10 +1,11 @@
-import os, re, asyncio, logging, shutil, tempfile, itertools
+import os, re, time, asyncio, logging, shutil, tempfile, itertools
 from collections import deque
 from google import genai
 from google.genai import types
 from openai import AsyncOpenAI
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.constants import ChatAction
+from telegram.error import TimedOut, NetworkError
 from telegram.ext import (Application, CommandHandler, MessageHandler, CallbackQueryHandler,
                           ContextTypes, filters)
 import media
@@ -473,8 +474,13 @@ async def on_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await msg.reply_text(f"🤖 {info}")
 
 
-def main():
-    app = Application.builder().token(os.environ["TELEGRAM_BOT_TOKEN"]).build()
+def build_app():
+    app = (Application.builder()
+           .token(os.environ["TELEGRAM_BOT_TOKEN"])
+           .connect_timeout(30).read_timeout(30).write_timeout(30).pool_timeout(30)
+           .get_updates_connect_timeout(30).get_updates_read_timeout(30)
+           .get_updates_write_timeout(30).get_updates_pool_timeout(30)
+           .build())
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("new", cmd_new))
     app.add_handler(CommandHandler("topic", cmd_topic))
@@ -486,7 +492,18 @@ def main():
     app.add_handler(CallbackQueryHandler(on_button, pattern=r"^dl:"))
     app.add_handler(MessageHandler(filters.VOICE | filters.AUDIO | filters.VIDEO | filters.VIDEO_NOTE, on_media))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & ~filters.VIA_BOT, on_text))
-    app.run_polling()
+    return app
+
+
+def main():
+    # при сетевых сбоях (TimedOut и т.п.) не падаем, а пробуем снова
+    while True:
+        try:
+            build_app().run_polling(bootstrap_retries=-1, close_loop=False)
+            break
+        except (TimedOut, NetworkError) as e:
+            log.warning("Сеть до Telegram недоступна (%s), повтор через 15 сек", e)
+            time.sleep(15)
 
 
 if __name__ == "__main__":
